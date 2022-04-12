@@ -89,7 +89,7 @@ class TransformerDecoderLayerBase(nn.Module):
 
 
 class TransformerEmbeddingLayerBase(nn.Module):
-    """Initialize the Lightseq Transformer Encoder Layer.
+    """Initialize the Lightseq Transformer Decoder Layer.
 
     Static variable:
         layer_id: The layer-index counter starting from 0 and incrementing by 1 every time a layer object is instantiated,

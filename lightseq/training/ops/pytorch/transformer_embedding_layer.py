@@ -15,9 +15,12 @@ _all_layer_grads = dict()
 
 
 class LSTransformerEmbeddingFunc(Function):
+    """custom Embedding op in the forward and backward pass"""
     @staticmethod
     def forward(ctx, config, input, embeddings, step):
         cuda_module = transformer_cuda_module
+
+        # custom op
         forward_func = (
             cuda_module.transformer_embedding_layer_fw_fp16
             if config.fp16
@@ -34,6 +37,8 @@ class LSTransformerEmbeddingFunc(Function):
     @staticmethod
     def backward(ctx, grad_output):
         cuda_module = transformer_cuda_module
+
+        # custom op
         backward_func = (
             cuda_module.transformer_embedding_layer_bw_fp16
             if ctx.config.fp16
@@ -118,6 +123,7 @@ class LSTransformerEmbeddingLayer(TransformerEmbeddingLayerBase):
         nn.init.constant_(self.embeddings[self.config.padding_idx], 0)
 
     def __assign_layer_weight_grad(self):
+        """fp16 or fp32"""
         param = (
             self.para_16
             if self.config.fp16 and self.embeddings.dtype != torch.half
@@ -137,6 +143,7 @@ class LSTransformerEmbeddingLayer(TransformerEmbeddingLayerBase):
         _all_layer_grads[self.config.layer_id] = grad
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
+        """return state dict"""
         destination = state_dict(
             self, destination=destination, prefix=prefix, keep_vars=keep_vars
         )

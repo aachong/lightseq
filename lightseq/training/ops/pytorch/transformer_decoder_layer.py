@@ -22,6 +22,7 @@ _shared_encdec_attn_kv_params = dict()
 
 
 class LSTransformerDecoderFunc(Function):
+    """custom op in the forward and backward pass"""
     @staticmethod
     def forward(
         ctx,
@@ -188,28 +189,31 @@ class LSTransformerDecoderLayer(TransformerDecoderLayerBase):
 
     @staticmethod
     def gen_offset(hidden_size, intermediate_size, nlayer):
+        """Returns the offset of each module's parameters among all 
+        parameters of a layer
+        """
         hs, ims = hidden_size, intermediate_size
         sizes = [
-            hs * hs * 3,  # attn_qkvw
-            hs * 3,  # attn_qkvb
-            hs * hs,  # attn_ow
-            hs,  # attn_ob
-            hs,  # attn_nw
-            hs,  # attn_nb
-            hs * hs,  # encdec_attn_qw
-            hs,  # encdec_attn_qb
-            hs * hs,  # encdec_attn_ow
-            hs,  # encdec_attn_ob
-            hs,  # encdec_attn_nw
-            hs,  # encdec_attn_nb
-            hs * ims,  # inter_w
-            ims,  # inter_b
-            hs * ims,  # output_w
-            hs,  # output_b
-            hs,  # ffn_nw
-            hs,  # ffn_nb
-            hs * hs * 2 * nlayer,  # encdec_attn_kvw
-            hs * 2 * nlayer,  # encdec_attn_kvb
+            hs * hs * 3,  # attn_qkv weight
+            hs * 3,  # attn_qkv bias
+            hs * hs,  # attn_out weight
+            hs,  # attn_out bias
+            hs,  # attn_layernorm weight
+            hs,  # attn_layernorm bias
+            hs * hs,  # encdec_attn_q weight
+            hs,  # encdec_attn_q bias
+            hs * hs,  # encdec_attn_out weight
+            hs,  # encdec_attn_out bias
+            hs,  # encdec_attn_layernorm weight
+            hs,  # encdec_attn_layernorm bias
+            hs * ims,  # inter weight
+            ims,  # inter bias
+            hs * ims,  # output weight
+            hs,  # output bias
+            hs,  # ffn norm weight
+            hs,  # ffn norm bias
+            hs * hs * 2 * nlayer,  # encdec_attn_kv w
+            hs * 2 * nlayer,  # encdec_attn_kv b
         ]
         offsets = calc_offset(sizes)
         return offsets
@@ -220,6 +224,7 @@ class LSTransformerDecoderLayer(TransformerDecoderLayerBase):
         )
 
     def calc_bound(self, w):
+        """Used to initialize parameters"""
         fan_in, _ = nn.init._calculate_fan_in_and_fan_out(w)
         bound = 1.0 / math.sqrt(fan_in)
         return bound
@@ -272,6 +277,7 @@ class LSTransformerDecoderLayer(TransformerDecoderLayerBase):
             nn.init.uniform_(self._get_weights(19), -bound, bound)
 
     def __assign_layer_weight_grad(self):
+        """fp16 or fp32"""
         param = (
             self.para_16
             if self.config.fp16 and self.para.dtype != torch.half

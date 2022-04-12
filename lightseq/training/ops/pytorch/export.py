@@ -5,6 +5,18 @@ from lightseq.training import LSTransformerEncoderLayer, LSTransformerDecoderLay
 
 
 def gather_token_embedding(tensor_names, state_dict, tn_pattern, scale=True):
+    """Return the weight of the token embedding.
+    Args:
+        tensor_names (list[str]): This list stores the names of the modules 
+            in the local model, usually it only contains module names for 
+            a particular layer of the model.
+        state_dict (Dict[str, torch.Tensor]): The state dict of native model.
+        tn_pattern (str): The alias of token embedding.
+        scale (Bool): embedding scale.
+    Return:
+        (torch.Tensor): The weight of the token embedding.
+        (list): The module name of token_embedding in the native model.
+    """
     target_tn = []
     for tn in tensor_names:
         if tn_pattern in tn.split("."):
@@ -18,6 +30,17 @@ def gather_token_embedding(tensor_names, state_dict, tn_pattern, scale=True):
 
 
 def apply_rule(proto_name, ckpt_rule, tensor_names, state_dict):
+    """Returns the weight with the specified module in the state-dict
+    Args:
+        proto_name (str): The name of a module in the state dict of protobuf model.
+        ckpt_rule (str): The alias of a module in the state dict of native model,
+            we will return the parameters of this module
+        tensor_names (List[str]): This list stores the names of the modules 
+            in the local model.
+        state_dict (Dict[str, torch.Tensor]): The state dict of native model.
+    Returns:
+        (torch.Tensor): the weight of proto_name module.
+    """
     def check_rule(tensor_name, rule):
         if "Adam" in tensor_name or "adam" in tensor_name:
             return False
@@ -80,6 +103,16 @@ def apply_rule(proto_name, ckpt_rule, tensor_names, state_dict):
 
 
 def fill_pb_layer(tensor_names, state_dict, layer, mapping_dict):
+    """Filling some weight of a layer in the protohub model.
+    Args:
+        tensor_names (list[str]): This list stores the names of the modules 
+            in the local model, usually it only contains module names for 
+            a particular layer of the model.
+        state_dict (dict[str, torch.Tensor]): The state dict of native model.
+        layer (proto type): The current layer in the protobuf model.
+        mapping_dict (dict[str, str]): Name mapping from protobuf name to 
+            native alias.
+    """
     for proto_name, ckpt_rule in mapping_dict.items():
         target_tensor = apply_rule(proto_name, ckpt_rule, tensor_names, state_dict)
         exec("layer.%s[:]=target_tensor.flatten().tolist()" % proto_name)
@@ -88,6 +121,7 @@ def fill_pb_layer(tensor_names, state_dict, layer, mapping_dict):
 def fill_hdf5_layer(
     tensor_names, state_dict, hdf5_file, hdf5_dataset_prefix, mapping_dict
 ):
+    """Filling some parameters of a layer in the hdf5 model."""
     for proto_name, ckpt_rule in mapping_dict.items():
         target_tensor = apply_rule(proto_name, ckpt_rule, tensor_names, state_dict)
         hdf5_file.create_dataset(
@@ -98,6 +132,7 @@ def fill_hdf5_layer(
 def fill_encdec_weight(
     file, state_dict, mapping_dict, is_encoder, save_pb, enc_out_mapping_dict=None
 ):
+    """ fill encoder or decoder weight of protobuf model"""
     var_name_list = list(state_dict.keys())
 
     tensor_names = {}
@@ -156,6 +191,7 @@ def fill_encdec_weight(
 
 
 def export_ls_embedding(file, state_dict, max_length, is_encoder, save_pb=True):
+    """fill embedding and position weight of protobuf model from lightseq model"""
     var_name_list = list(state_dict.keys())
     emb, target_tn = gather_token_embedding(var_name_list, state_dict, "embeddings")
     if is_encoder:
@@ -203,6 +239,7 @@ def export_ls_embedding(file, state_dict, max_length, is_encoder, save_pb=True):
 
 
 def export_ls_encoder(file, state_dict, hidden_size, intermediate_size, save_pb=True):
+    """fill encoder of protobuf model from lightseq model"""
     hs, ims = hidden_size, intermediate_size
     offsets = LSTransformerEncoderLayer.gen_offset(hs, ims)
     mapping_dict = OrderedDict(
@@ -251,6 +288,7 @@ def export_ls_encoder(file, state_dict, hidden_size, intermediate_size, save_pb=
 def export_ls_decoder(
     file, state_dict, hidden_size, intermediate_size, nlayer, save_pb=True
 ):
+    """fill decoder of protobuf model from lightseq model"""
     hs, ims = hidden_size, intermediate_size
     offsets = LSTransformerDecoderLayer.gen_offset(hs, ims, nlayer)
     mapping_dict = OrderedDict(

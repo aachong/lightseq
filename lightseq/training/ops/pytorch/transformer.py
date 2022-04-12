@@ -12,6 +12,15 @@ from lightseq.training.ops.pytorch.util import MODEL_ARCH
 
 
 class LSTransformer(nn.Module):
+    """
+    Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
+    <https://arxiv.org/abs/1706.03762>`_.
+
+    Args:
+        config (dataclass.Namespace): The config of model
+        encoder (Lightseq TransformerEncoder): the encoder
+        decoder (Lightseq TransformerDecoder): the decoder
+    """
     def __init__(self, config):
         super(LSTransformer, self).__init__()
         self.config = config
@@ -25,6 +34,7 @@ class LSTransformer(nn.Module):
 
     @staticmethod
     def get_config(**kwargs):
+        """Add model-specific arguments."""
         @dataclass
         class Config:
             max_batch_tokens: int  # max batch token numbers
@@ -53,6 +63,7 @@ class LSTransformer(nn.Module):
         return Config(**kwargs)
 
     def build_model(self, config):
+        """Build a new model instance."""
         encoder_embed_tokens = self.build_embedding(config)
         decoder_embed_tokens = self.build_embedding(config)
 
@@ -60,6 +71,7 @@ class LSTransformer(nn.Module):
         self.decoder = self.build_decoder(config, decoder_embed_tokens)
 
     def build_embedding(self, config):
+        """Build a new embedding instance."""
         emb_config = LSTransformerEmbeddingLayer.get_config(
             vocab_size=config.vocab_size,
             embedding_dim=config.hidden_size,
@@ -86,6 +98,15 @@ class LSTransformer(nn.Module):
 
 
 class LSTransformerEncoder(nn.Module):
+    """
+    Transformer encoder consisting of *config.num_encoder_layer* layers. Each layer
+    is a :class:`LSTransformerEncoderLayer`. You can *args.encoder_normalize_before* 
+    to ``True`` on fairseq to match our default configuration
+
+    Args:
+        config (dataclass.Namespace): arguments class
+        embed_tokens (torch.nn.Embedding): input embedding
+    """
     def __init__(self, config, embed_tokens):
         super(LSTransformerEncoder, self).__init__()
         self.config = config
@@ -123,13 +144,17 @@ class LSTransformerEncoder(nn.Module):
         return x
 
     def forward(self, src_tokens):
+        # embed tokens, positions, scale and dropout in a kernel function
         x = self.forward_embedding(src_tokens)
 
+        # compute padding mask
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
 
+        # encoder layers
         for layer in self.layers:
             x = layer(x, encoder_padding_mask)
 
+        # default final layer norm
         x = self.layer_norm(x)
         x = x.transpose(0, 1)
 
@@ -137,6 +162,15 @@ class LSTransformerEncoder(nn.Module):
 
 
 class LSTransformerDecoder(nn.Module):
+    """
+    Transformer decoder consisting of *config.num_decoder_layer* layers. Each layer
+    is a :class:`LSTransformerDecoderLayer`.You can *args.decoder_normalize_before* 
+    to ``True`` on fairseq to match our default configuration
+
+    Args:
+        config (dataclass.Namespace): arguments class
+        embed_tokens (torch.nn.Embedding): input embedding
+    """
     def __init__(self, config, embed_tokens):
         super(LSTransformerDecoder, self).__init__()
         self.config = config
@@ -150,6 +184,7 @@ class LSTransformerDecoder(nn.Module):
         )
         self.num_layers = len(self.layers)
 
+        # default setting
         self.layer_norm = nn.LayerNorm(embed_dim)
 
         self.output_projection = nn.Linear(
@@ -186,12 +221,14 @@ class LSTransformerDecoder(nn.Module):
         return x
 
     def forward(self, trg_tokens, encoder_out, encoder_padding_mask, cache=None):
+        # embed tokens, positions, scale and dropout in a kernel function
         x = self.forward_embedding(trg_tokens, cache)
 
         if cache == {}:
             for i in range(self.num_layers):
                 cache[i] = {}
 
+        # decoder layers
         for i, layer in enumerate(self.layers):
             layer_cache = cache[i] if cache else None
             x = layer(
@@ -201,6 +238,7 @@ class LSTransformerDecoder(nn.Module):
                 layer_cache,
             )
 
+        # default final layer norm
         x = self.layer_norm(x)
 
         x = self.output_projection(x)

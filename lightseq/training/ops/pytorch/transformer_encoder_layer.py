@@ -21,6 +21,7 @@ _all_layer_grads = dict()
 
 
 class LSTransformerEncoderFunc(Function):
+    """custom op in the forward and backward pass"""
     @staticmethod
     def forward(
         ctx,
@@ -136,6 +137,7 @@ class LSTransformerEncoderLayer(TransformerEncoderLayerBase):
 
     @staticmethod
     def get_config(**kwargs):
+        """Configuration of model hyperparameters for encoder and decoder"""
         @dataclass
         class Config:
             max_batch_tokens: int  # max batch token numbers
@@ -163,27 +165,29 @@ class LSTransformerEncoderLayer(TransformerEncoderLayerBase):
 
     @staticmethod
     def gen_offset(hidden_size, intermediate_size):
+        """Returns the offset of each module's parameters among all 
+        parameters of a layer
+        """
         hs, ims = hidden_size, intermediate_size
         sizes = [
-            hs * hs * 3,  # attn_qkvw
-            hs * 3,  # attn_qkvb
-            hs * hs,  # attn_ow
-            hs,  # attn_ob
-            hs,  # attn_nw
-            hs,  # attn_nb
-            hs * ims,  # inter_w
-            ims,  # inter_b
-            hs * ims,  # output_w
-            hs,  # output_b
-            hs,  # ffn_nw
-            hs,  # ffn_nb
+            hs * hs * 3,  # attn_qkv weight
+            hs * 3,  # attn_qkv bias
+            hs * hs,  # attn_out weight
+            hs,  # attn_out bias
+            hs,  # attn_layernorm weight
+            hs,  # attn_layernorm bias
+            hs * ims,  # ffn_inter weight
+            ims,  # ffn_inter bias
+            hs * ims,  # ffn_output weight
+            hs,  # ffn_output bias
+            hs,  # ffn_layernorm weight
+            hs,  # ffn_layernorm bias
         ]
         offsets = calc_offset(sizes)
         return offsets
 
     def create_cpp_layer(self):
-
-        # create the layer in cuda kernels.
+        """create the layer in cuda kernels."""
         cuda_module = transformer_cuda_module
         create_layer_func = (
             cuda_module.create_transformer_encoder_layer_fp16
@@ -212,11 +216,13 @@ class LSTransformerEncoderLayer(TransformerEncoderLayerBase):
         )
 
     def calc_bound(self, w):
+        """Used to initialize parameters"""
         fan_in, _ = nn.init._calculate_fan_in_and_fan_out(w)
         bound = 1.0 / math.sqrt(fan_in)
         return bound
 
     def init_transformer_weights(self):
+        """initialize parameters"""
         hs = self.config.hidden_size
         ims = self.config.intermediate_size
         attn_qkvw = self._get_weights(0).view(-1, hs)
@@ -244,6 +250,7 @@ class LSTransformerEncoderLayer(TransformerEncoderLayerBase):
         nn.init.zeros_(self._get_weights(11))
 
     def __assign_layer_weight_grad(self):
+        """fp16 or fp32"""
         param = (
             self.para_16
             if self.config.fp16 and self.para.dtype != torch.half
@@ -262,6 +269,7 @@ class LSTransformerEncoderLayer(TransformerEncoderLayerBase):
         _all_layer_grads[self.config.layer_id] = grad
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
+        """return state dict"""
         destination = state_dict(
             self, destination=destination, prefix=prefix, keep_vars=keep_vars
         )
