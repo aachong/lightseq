@@ -1,3 +1,4 @@
 from .ls_adam import LSFSAdam
 from .ls_label_smoothed_cross_entropy import LSLabelSmoothedCrossEntropyCriterion
+from .quant_special_entropy import QuantSpecialEntropyCriterion
 from .ls_transformer import LSTransformerModel
