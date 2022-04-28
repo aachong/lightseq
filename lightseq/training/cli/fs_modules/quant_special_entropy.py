@@ -118,9 +118,9 @@ class QuantSpecialEntropyCriterion(FairseqCriterion):
         )
         logging_output = {
             "loss": loss.data,
-            "quant_loss":quant_loss,
-            "dequant_loss":dequant_loss,
-            "symm_kl":symm_kl,
+            "quant_loss":quant_loss.data,
+            "dequant_loss":dequant_loss.data,
+            "symm_kl":symm_kl.data,
             "nll_loss": quant_nll_loss.data,
             "ntokens": sample["ntokens"],
             "nsentences": sample["target"].size(0),
