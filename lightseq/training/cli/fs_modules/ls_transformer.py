@@ -228,12 +228,12 @@ class LSTransformerEncoder(FairseqEncoder):
         self.embed_tokens = embed_tokens
         self.padding_idx = self.embed_tokens.config.padding_idx
 
-        self.layers = []
+        self.layers = nn.ModuleList([])
         if args.int4_encoder_layer:
             assert (
                 args.enable_quant is True
             ), "enable_quant must be True"
-            int4_layer_index = map(int, args.int4_encoder_layer.split(' '))
+            int4_layer_index = list(map(int, args.int4_encoder_layer.split(' ')))
             for index in range(args.encoder_layers):
                 if index + 1 in int4_layer_index:
                     self.layers.append(self.build_encoder_layer(args, num_bits=4))
@@ -355,13 +355,13 @@ class LSTransformerDecoder(FairseqIncrementalDecoder):
         self.embed_tokens = embed_tokens
         self.padding_idx = self.embed_tokens.config.padding_idx
 
-        self.layers = []
+        self.layers = nn.ModuleList([])
         if args.int4_decoder_layer:
             assert (
                 args.enable_quant is True
             ), "enable_quant must be True"
             # get layer index
-            int4_layer_index = map(int, args.int4_decoder_layer.split(' '))
+            int4_layer_index = list(map(int, args.int4_decoder_layer.split(' ')))
             for index in range(args.decoder_layers):
                 if index + 1 in int4_layer_index:
                     self.layers.append(self.build_decoder_layer(args, num_bits=4))
