@@ -33,6 +33,7 @@ class TransformerEncoderLayerBase(nn.Module):
             fp16: bool  # fp16 presion
             local_rank: int  # rank in local node
             activation_fn: str = "relu"  # relu or gelu
+            num_bits: int = 8# num bits of quant
 
         if "model" in kwargs:
             if kwargs["model"] not in MODEL_ARCH:
@@ -76,6 +77,7 @@ class TransformerDecoderLayerBase(nn.Module):
             local_rank: int  # rank in local node
             nlayer: int  # number of layers
             activation_fn: str = "relu"  # relu or gelu
+            num_bits: int = 8# num bits of quant
 
         if "model" in kwargs:
             if kwargs["model"] not in MODEL_ARCH:
@@ -114,5 +116,6 @@ class TransformerEmbeddingLayerBase(nn.Module):
             dropout: float  # embedding dropout ration
             fp16: bool  # fp16 presion
             local_rank: int  # rank in local node
+            num_bits: int # num bits of quant
 
         return Config(**kwargs)

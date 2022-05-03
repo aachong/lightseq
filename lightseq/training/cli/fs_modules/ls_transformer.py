@@ -122,6 +122,12 @@ class LSTransformerModel(FairseqEncoderDecoderModel):
                             help='enable quantization')
         parser.add_argument('--quant-mode', type=str,  default="qat", choices=["qat", "ptq"],
                             help='quantization mode')
+        parser.add_argument('--quant-num-bits', type=int, metavar='D', default=8,
+                            help='num bits of fake quantization at training time')
+        parser.add_argument('--int4-encoder-layer', type=str, metavar='D', default="",
+                            help='encoder block从1开始, 0 1 2表示embedding和第1,2层, 剩下的用int8')
+        parser.add_argument('--int4-decoder-layer', type=str, metavar='D', default="",
+                            help='decoder block从1开始, 0 1 2表示embedding和第1,2层, 剩下的用int8')
         # args for Fully Sharded Data Parallel (FSDP) training
         parser.add_argument(
             '--min-params-to-wrap', type=int, metavar='D', default=DEFAULT_MIN_PARAMS_TO_WRAP,
@@ -140,11 +146,15 @@ class LSTransformerModel(FairseqEncoderDecoderModel):
     def build_model(cls, args, task):
         src_dict, tgt_dict = task.source_dictionary, task.target_dictionary
 
+        # 指定embedding是否用int4
+        enc_embed_bits = 4 if '0' in args.int4_encoder_layer else args.quant_num_bits
+        dec_embed_bits = 4 if '0' in args.int4_decoder_layer else args.quant_num_bits
+
         encoder_embed_tokens = cls.build_embedding(
-            args, src_dict, args.encoder_embed_dim, args.max_source_positions
+            args, src_dict, args.encoder_embed_dim, args.max_source_positions, num_bits=enc_embed_bits
         )
         decoder_embed_tokens = cls.build_embedding(
-            args, tgt_dict, args.decoder_embed_dim, args.max_target_positions
+            args, tgt_dict, args.decoder_embed_dim, args.max_target_positions, num_bits=dec_embed_bits
         )
 
         encoder = cls.build_encoder(args, src_dict, encoder_embed_tokens)
@@ -170,7 +180,7 @@ class LSTransformerModel(FairseqEncoderDecoderModel):
         return cls(args, encoder, decoder)
 
     @classmethod
-    def build_embedding(cls, args, dictionary, embed_dim, max_positions, **kwargs):
+    def build_embedding(cls, args, dictionary, embed_dim, max_positions, num_bits=8, **kwargs):
         if args.use_torch_layer:
             from lightseq.training.ops.pytorch.torch_transformer_layers import (
                 TransformerEmbeddingLayer,
@@ -189,6 +199,7 @@ class LSTransformerModel(FairseqEncoderDecoderModel):
             dropout=args.dropout,
             fp16=args.fp16,
             local_rank=args.device_id,
+            num_bits=num_bits,
         )
         emb = TransformerEmbeddingLayer(config)
 
@@ -217,14 +228,26 @@ class LSTransformerEncoder(FairseqEncoder):
         self.embed_tokens = embed_tokens
         self.padding_idx = self.embed_tokens.config.padding_idx
 
-        self.layers = nn.ModuleList(
-            [self.build_encoder_layer(args) for _ in range(args.encoder_layers)]
-        )
+        self.layers = []
+        if args.int4_encoder_layer:
+            assert (
+                args.enable_quant is True
+            ), "enable_quant must be True"
+            int4_layer_index = map(int, args.int4_encoder_layer.split(' '))
+            for index in range(args.encoder_layers):
+                if index + 1 in int4_layer_index:
+                    self.layers.append(self.build_encoder_layer(args, num_bits=4))
+                else:
+                    self.layers.append(self.build_encoder_layer(args, num_bits=args.quant_num_bits))
+        else :
+            self.layers = nn.ModuleList(
+                [self.build_encoder_layer(args, args.quant_num_bits) for _ in range(args.encoder_layers)]
+            )
         self.num_layers = len(self.layers)
 
         self.layer_norm = LayerNorm(embed_dim)
 
-    def build_encoder_layer(self, args):
+    def build_encoder_layer(self, args, num_bits=8):
         if args.use_torch_layer:
             from lightseq.training.ops.pytorch import TransformerEncoderLayer
         else:
@@ -245,6 +268,7 @@ class LSTransformerEncoder(FairseqEncoder):
             fp16=args.fp16,
             local_rank=args.device_id,
             activation_fn=args.activation_fn,
+            num_bits=num_bits,
         )
 
         return TransformerEncoderLayer(config)
@@ -331,9 +355,23 @@ class LSTransformerDecoder(FairseqIncrementalDecoder):
         self.embed_tokens = embed_tokens
         self.padding_idx = self.embed_tokens.config.padding_idx
 
-        self.layers = nn.ModuleList(
-            [self.build_decoder_layer(args) for _ in range(args.decoder_layers)]
-        )
+        self.layers = []
+        if args.int4_decoder_layer:
+            assert (
+                args.enable_quant is True
+            ), "enable_quant must be True"
+            # get layer index
+            int4_layer_index = map(int, args.int4_decoder_layer.split(' '))
+            for index in range(args.decoder_layers):
+                if index + 1 in int4_layer_index:
+                    self.layers.append(self.build_decoder_layer(args, num_bits=4))
+                else:
+                    self.layers.append(self.build_decoder_layer(args, num_bits=args.quant_num_bits))
+        else :
+            self.layers = nn.ModuleList(
+                [self.build_decoder_layer(args, num_bits=args.quant_num_bits) for _ in range(args.decoder_layers)]
+            )
+
         self.num_layers = len(self.layers)
 
         self.layer_norm = LayerNorm(embed_dim)
@@ -342,6 +380,7 @@ class LSTransformerDecoder(FairseqIncrementalDecoder):
             self.output_projection = QuantLinear(
                 self.embed_tokens.embeddings.shape[1],
                 self.embed_tokens.embeddings.shape[0],
+                num_bits=args.quant_num_bits,
                 bias=False,
             )
             self.output_projection.weight_quant = self.embed_tokens.emb_quant
@@ -356,7 +395,7 @@ class LSTransformerDecoder(FairseqIncrementalDecoder):
                 )
         self.output_projection.weight = self.embed_tokens.embeddings
 
-    def build_decoder_layer(self, args):
+    def build_decoder_layer(self, args, num_bits=8):
         if args.use_torch_layer:
             from lightseq.training.ops.pytorch.torch_transformer_layers import (
                 TransformerDecoderLayer,
@@ -380,6 +419,7 @@ class LSTransformerDecoder(FairseqIncrementalDecoder):
             local_rank=args.device_id,
             nlayer=args.decoder_layers,
             activation_fn=args.activation_fn,
+            num_bits=num_bits,
         )
         return TransformerDecoderLayer(config)
 

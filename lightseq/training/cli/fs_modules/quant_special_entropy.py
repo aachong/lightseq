@@ -89,23 +89,29 @@ class QuantSpecialEntropyCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        def open_quant(m):
-            if isinstance(m, TensorQuantizer):
-                m.enable()
-
-        def close_quant(m):
+        def disable_quant(m):
             if isinstance(m, TensorQuantizer):
                 m.disable()
+                m.disable_quant()
+                m.disable_calib()
+                m.disable_clip()
+                
+        def qat_mode(m):
+            if isinstance(m, TensorQuantizer):
+                m.enable()
+                m.enable_quant()
+                m.disable_calib()
+                m.enable_clip()
 
         quant_output = model(**sample["net_input"])
         target = model.get_targets(sample, quant_output)
         target = target.to(torch.int32)
         quant_loss, quant_nll_loss = self.ls_cross_entropy(quant_output[0], target)
 
-        model.apply(close_quant)
+        model.apply(disable_quant)
         dequant_output = model(**sample["net_input"])
         dequant_loss, dequant_nll_loss = self.ls_cross_entropy(dequant_output[0], target)
-        model.apply(open_quant)
+        model.apply(qat_mode)
         
         if self.kl_oneside:
             dequant_output[0].detach_()

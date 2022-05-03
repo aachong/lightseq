@@ -22,8 +22,7 @@ from lightseq.training.ops.pytorch.layer_base import (
 from .quantization import (
     QuantLinear,
     TensorQuantizer,
-    act_quant_config,
-    weight_quant_config,
+    get_quant_config,
 )
 
 
@@ -46,8 +45,10 @@ class MultiheadAttention(nn.Module):
         self_attention=False,
         encoder_decoder_attention=False,
         is_decoder=False,
+        num_bits=8,
     ):
         super().__init__()
+        act_quant_config, relu_quant_config, weight_quant_config = get_quant_config(num_bits)
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
@@ -73,21 +74,21 @@ class MultiheadAttention(nn.Module):
         self.attention_quant = None
         if self.self_attention:
             # self.qkv_proj = Linear(embed_dim, 3*embed_dim, bias=bias)
-            self.qkv_proj = QuantLinear(embed_dim, 3 * embed_dim, bias=bias)
+            self.qkv_proj = QuantLinear(embed_dim, 3 * embed_dim, num_bits=num_bits, bias=bias)
 
             self.attention_quant = (
                 TensorQuantizer(act_quant_config) if self.is_decoder else None
             )
         elif self.encoder_decoder_attention and self.is_decoder:
             self.k_proj = QuantLinear(
-                self.kdim, embed_dim, pre_activation="encoder_out", bias=bias
+                self.kdim, embed_dim, pre_activation="encoder_out", num_bits=num_bits, bias=bias
             )
             self.v_proj = QuantLinear(
-                self.vdim, embed_dim, pre_activation="encoder_out", bias=bias
+                self.vdim, embed_dim, pre_activation="encoder_out", num_bits=num_bits, bias=bias
             )
-            self.q_proj = QuantLinear(embed_dim, embed_dim, bias=bias)
+            self.q_proj = QuantLinear(embed_dim, embed_dim, num_bits=num_bits, bias=bias)
 
-        self.out_proj = QuantLinear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = QuantLinear(embed_dim, embed_dim, num_bits=num_bits, bias=bias)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.Tensor(1, 1, embed_dim))
@@ -520,10 +521,11 @@ class TransformerEncoderLayer(TransformerEncoderLayerBase):
 
     def __init__(self, config, initial_weights=None, initial_biases=None):
         super().__init__()
+        act_quant_config, relu_quant_config, weight_quant_config = get_quant_config(config.num_bits)
         self.embed_dim = config.hidden_size
 
         self.self_attn = self.build_self_attention(
-            self.embed_dim, config.nhead, config.attn_prob_dropout_ratio
+            self.embed_dim, config.nhead, config.attn_prob_dropout_ratio, num_bits=config.num_bits
         )
         self.self_attn_layer_norm = LayerNorm(self.embed_dim)
         self.dropout_module = Dropout(config.hidden_dropout_ratio)
@@ -533,19 +535,21 @@ class TransformerEncoderLayer(TransformerEncoderLayerBase):
         self.fc1 = QuantLinear(
             self.embed_dim,
             config.intermediate_size,
+            num_bits=config.num_bits
         )
         self.fc2 = QuantLinear(
-            config.intermediate_size, self.embed_dim, pre_activation="relu"
+            config.intermediate_size, self.embed_dim, pre_activation="relu", num_bits=config.num_bits
         )
 
         self.final_layer_norm = LayerNorm(self.embed_dim)
 
-    def build_self_attention(self, embed_dim, nhead, attn_dropout):
+    def build_self_attention(self, embed_dim, nhead, attn_dropout, num_bits=8,):
         return MultiheadAttention(
             embed_dim,
             nhead,
             dropout=attn_dropout,
             self_attention=True,
+            num_bits=num_bits,
         )
 
     def residual_connection(self, x, residual):
@@ -623,6 +627,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
 
     def __init__(self, config, initial_weights=None, initial_biases=None):
         super().__init__()
+        act_quant_config, relu_quant_config, weight_quant_config = get_quant_config(config.num_bits)
         self.embed_dim = config.hidden_size
         self.dropout_module = Dropout(config.hidden_dropout_ratio)
         self.cross_self_attention = False
@@ -631,6 +636,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
             self.embed_dim,
             config.nhead,
             config.attn_prob_dropout_ratio,
+            num_bits=config.num_bits
         )
 
         self.activation_fn = util.get_activation_fn(activation=config.activation_fn)
@@ -644,17 +650,20 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
             config.hidden_size,
             config.attn_prob_dropout_ratio,
             config.nhead,
+            num_bits=config.num_bits
         )
         self.encoder_attn_layer_norm = LayerNorm(self.embed_dim)
 
         self.fc1 = QuantLinear(
             self.embed_dim,
             config.intermediate_size,
+            num_bits=config.num_bits
         )
         self.fc2 = QuantLinear(
             config.intermediate_size,
             self.embed_dim,
             pre_activation="relu",
+            num_bits=config.num_bits
         )
 
         self.final_layer_norm = LayerNorm(self.embed_dim)
@@ -663,7 +672,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
         self.onnx_trace = False
 
     def build_self_attention(
-        self, embed_dim, nhead, attn_dropout, add_bias_kv=False, add_zero_attn=False
+        self, embed_dim, nhead, attn_dropout, add_bias_kv=False, add_zero_attn=False, num_bits=8,
     ):
         return MultiheadAttention(
             embed_dim,
@@ -673,10 +682,11 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
             add_zero_attn=add_zero_attn,
             self_attention=not self.cross_self_attention,
             is_decoder=True,
+            num_bits=num_bits,
         )
 
     def build_encoder_attention(
-        self, embed_dim, encoder_embed_dim, attn_dropout, nhead
+        self, embed_dim, encoder_embed_dim, attn_dropout, nhead, num_bits=8,
     ):
         return MultiheadAttention(
             embed_dim,
@@ -686,6 +696,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
             dropout=attn_dropout,
             encoder_decoder_attention=True,
             is_decoder=True,
+            num_bits=num_bits,
         )
 
     def prepare_for_onnx_export_(self):
@@ -849,7 +860,7 @@ class TransformerDecoderLayer(TransformerDecoderLayerBase):
 class TransformerEmbeddingLayer(TransformerEmbeddingLayerBase):
     def __init__(self, config):
         super().__init__()
-
+        act_quant_config, relu_quant_config, weight_quant_config = get_quant_config(config.num_bits)
         self.emb_lookup = nn.Embedding(
             config.vocab_size, config.embedding_dim, padding_idx=config.padding_idx
         )

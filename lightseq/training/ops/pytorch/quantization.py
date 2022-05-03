@@ -15,20 +15,49 @@ from lightseq.training.pytorch_quantization.nn.modules.tensor_quantizer import (
 )
 
 
-act_quant_config = QuantDescriptor(
+act_quant_config_int8 = QuantDescriptor(
     num_bits=8, narrow_range=True, learn_amax=True, amax=16.0
 )
-relu_quant_config = QuantDescriptor(
+relu_quant_config_int8 = QuantDescriptor(
     num_bits=8, narrow_range=True, learn_amax=True, amax=16.0, unsigned=True
 )
-weight_quant_config = QuantDescriptor(
+weight_quant_config_int8 = QuantDescriptor(
     num_bits=8, narrow_range=True, learn_amax=True, amax=1.0
 )
+act_quant_config_int4 = QuantDescriptor(
+    num_bits=4, narrow_range=True, learn_amax=True, amax=16.0
+)
+relu_quant_config_int4 = QuantDescriptor(
+    num_bits=4, narrow_range=True, learn_amax=True, amax=16.0, unsigned=True
+)
+weight_quant_config_int4 = QuantDescriptor(
+    num_bits=4, narrow_range=True, learn_amax=True, amax=1.0
+)
 
+def get_quant_config(num_bits=8):
+    """
+    Returns:
+        act_quant_config, relu_quant_config, weight_quant_config
+    """
+    if num_bits == 8:
+        act_quant_config = act_quant_config_int8
+        relu_quant_config = relu_quant_config_int8
+        weight_quant_config = weight_quant_config_int8
+    elif num_bits == 4:
+        act_quant_config = act_quant_config_int4
+        relu_quant_config = relu_quant_config_int4
+        weight_quant_config = weight_quant_config_int4
+    else:
+        raise NotImplementedError(
+            f"int{num_bits} is not supported"
+        )
+    return act_quant_config, relu_quant_config, weight_quant_config
 
 class QuantLinear(Linear):
-    def __init__(self, in_features, out_features, pre_activation=None, *args, **kwargs):
+    def __init__(self, in_features, out_features, pre_activation=None, num_bits=8, *args, **kwargs):
         super(QuantLinear, self).__init__(in_features, out_features, *args, **kwargs)
+        act_quant_config, relu_quant_config, weight_quant_config = get_quant_config(num_bits=8)
+
         if pre_activation is None or pre_activation == "encoder_out":
             input_quant_config = act_quant_config
         elif pre_activation == "relu":
