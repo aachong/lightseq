@@ -380,7 +380,7 @@ class LSTransformerDecoder(FairseqIncrementalDecoder):
             self.output_projection = QuantLinear(
                 self.embed_tokens.embeddings.shape[1],
                 self.embed_tokens.embeddings.shape[0],
-                num_bits=args.quant_num_bits,
+                num_bits=4 if 7 in int4_layer_index else args.quant_num_bits,
                 bias=False,
             )
             self.output_projection.weight_quant = self.embed_tokens.emb_quant
